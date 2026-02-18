@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from aiogram import Bot
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -12,6 +10,7 @@ from app.db.session import session_scope
 from app.keyboards.common import main_menu_keyboard, subscription_keyboard
 from app.services.render import main_description
 from app.services.subscription import is_user_subscribed
+from app.services.time_utils import utcnow_naive
 
 
 def _full_name(message: Message) -> str:
@@ -68,7 +67,7 @@ async def send_main_menu(
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = utcnow_naive()
     async with session_scope(session_factory) as session:
         repo = Repo(session)
         events = await repo.list_events_for_main(now)
@@ -87,4 +86,3 @@ async def send_main_menu(
     if target.message:
         await target.message.answer(text, reply_markup=keyboard)
     await target.answer()
-

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.db.models import Event, Participation, Submission, SubmissionType, User
+from app.services.time_utils import to_utc_naive, utcnow_naive
 
 
 @dataclass(slots=True)
@@ -135,8 +136,8 @@ class Repo:
         event = await self.get_event(event_id)
         if event is None:
             return None
-        event.end_at = new_end_at
-        if new_end_at > datetime.now(new_end_at.tzinfo):
+        event.end_at = to_utc_naive(new_end_at)
+        if to_utc_naive(new_end_at) > utcnow_naive():
             event.closed_notified = False
         await self.session.flush()
         return event
@@ -260,4 +261,3 @@ class Repo:
 
         await self.session.flush()
         return assigned, missing
-

@@ -29,9 +29,9 @@ def main_description(
 ) -> str:
     return (
         f"<b>{escape(bot_name)}</b>\n\n"
-        "Бот для участия в конкурсах и ивентах.\n"
-        f"Канал: <a href=\"{escape(channel_url)}\">{escape(channel_name)}</a>\n"
-        f"Разработчик: <a href=\"{escape(developer_url)}\">{escape(developer_url)}</a>\n\n"
+        f"Привет! Это бот розыгрышей и конкурсов от <a href=\"{escape(channel_url)}\">{escape(channel_name)}</a>\n\n"
+        f"Напишите команду /my, чтобы узнать в каких конкурсах ты принял участие!\n\n"
+        f"По всем вопросам: <a href=\"{escape(developer_url)}\">{escape(developer_url)}</a>\n"
         "Ниже выберите активный ивент."
     )
 

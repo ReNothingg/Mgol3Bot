@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from html import escape
 import re
 
@@ -25,6 +25,7 @@ from app.keyboards.admin import (
 from app.services.datetime_utils import DATETIME_INPUT_FORMAT, parse_datetime_utc
 from app.services.notifier import send_submission_to_admins
 from app.services.render import event_manage_text
+from app.services.time_utils import utcnow_naive
 
 router = Router(name="admin")
 
@@ -371,7 +372,7 @@ async def admin_deadline_finish(
     if new_deadline is None:
         await message.answer(f"Неверный формат. Используйте {DATETIME_INPUT_FORMAT}.")
         return
-    if new_deadline <= datetime.now(timezone.utc):
+    if new_deadline <= utcnow_naive():
         await message.answer("Дедлайн должен быть в будущем.")
         return
 
@@ -575,4 +576,3 @@ def _parse_ids(text: str) -> list[int]:
         result.append(value)
         seen.add(value)
     return result
-

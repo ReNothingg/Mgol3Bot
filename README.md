@@ -41,7 +41,7 @@ pip install -r requirements.txt
 1. Запустите бота:
 
 ```bash
-python -m app.main
+python3 -m app.main
 ```
 
 ## Важно

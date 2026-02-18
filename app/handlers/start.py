@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from aiogram import Bot, Router
 from aiogram.filters import CommandStart
 from aiogram.filters.command import CommandObject
@@ -13,6 +11,7 @@ from app.db.repo import Repo
 from app.db.session import session_scope
 from app.handlers.common import ensure_subscribed, ensure_user_saved, send_main_menu
 from app.services.notifier import notify_admins
+from app.services.time_utils import is_within_period, utcnow_naive
 
 router = Router(name="start")
 
@@ -94,14 +93,17 @@ async def handle_deep_link_join(
         return
 
     event_id = int(event_id_str)
-    now = datetime.now(timezone.utc)
+    now = utcnow_naive()
     async with session_scope(session_factory) as session:
         repo = Repo(session)
         event = await repo.get_event(event_id)
         if event is None:
             await message.answer("Ивент по ссылке не найден.")
             return
-        if not (event.is_active and event.start_at <= now <= event.end_at):
+        if not (
+            event.is_active
+            and is_within_period(now=now, start=event.start_at, end=event.end_at)
+        ):
             await message.answer("Ивент по ссылке уже недоступен.")
             return
 

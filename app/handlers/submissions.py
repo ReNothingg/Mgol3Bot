@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from html import escape
 
 from aiogram import Bot, F, Router
@@ -16,6 +15,7 @@ from app.db.session import session_scope
 from app.handlers.common import ensure_subscribed
 from app.keyboards.common import submission_cancel_keyboard
 from app.services.notifier import send_submission_to_admins
+from app.services.time_utils import is_within_period, utcnow_naive
 
 router = Router(name="submissions")
 
@@ -47,14 +47,17 @@ async def ask_for_submission(
         await callback.answer("Некорректный ID.")
         return
 
-    now = datetime.now(timezone.utc)
+    now = utcnow_naive()
     async with session_scope(session_factory) as session:
         repo = Repo(session)
         event = await repo.get_event(event_id)
         if event is None:
             await callback.answer("Ивент не найден.")
             return
-        if not (event.is_active and event.start_at <= now <= event.end_at):
+        if not (
+            event.is_active
+            and is_within_period(now=now, start=event.start_at, end=event.end_at)
+        ):
             await callback.answer("Ивент уже закрыт.", show_alert=True)
             return
 

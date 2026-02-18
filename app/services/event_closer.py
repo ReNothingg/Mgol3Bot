@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 from html import escape
 
 from aiogram import Bot
@@ -11,6 +10,7 @@ from app.db.repo import Repo
 from app.db.session import session_scope
 from app.services.notifier import send_submission_to_admins
 from app.services.render import format_dt
+from app.services.time_utils import utcnow_naive
 
 
 class EventCloser:
@@ -56,7 +56,7 @@ class EventCloser:
                 continue
 
     async def process_expired_events(self, bot: Bot) -> None:
-        now = datetime.now(timezone.utc)
+        now = utcnow_naive()
         async with session_scope(self.session_factory) as session:
             repo = Repo(session)
             events = await repo.list_expired_events_for_notify(now)
@@ -91,4 +91,3 @@ class EventCloser:
                     )
 
                 await repo.mark_event_closed_notified(event.id)
-

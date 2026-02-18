@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from html import escape
 
 from aiogram import Bot, Router
@@ -14,6 +13,7 @@ from app.handlers.common import ensure_subscribed
 from app.keyboards.common import event_keyboard
 from app.services.notifier import notify_admins
 from app.services.render import event_card_text
+from app.services.time_utils import is_within_period, utcnow_naive
 
 router = Router(name="events")
 
@@ -44,7 +44,7 @@ async def open_event_card(
         await callback.answer("Некорректный ID ивента.")
         return
 
-    now = datetime.now(timezone.utc)
+    now = utcnow_naive()
     async with session_scope(session_factory) as session:
         repo = Repo(session)
         event = await repo.get_event(event_id)
@@ -63,7 +63,11 @@ async def open_event_card(
         event=event,
         participation=participation,
         has_submission=has_submission,
-        is_open_now=event.is_active and event.start_at <= now <= event.end_at,
+        is_open_now=event.is_active and is_within_period(
+            now=now,
+            start=event.start_at,
+            end=event.end_at,
+        ),
     )
     await callback.message.answer(event_card_text(event), reply_markup=keyboard)
     await callback.answer()
@@ -90,14 +94,17 @@ async def join_event(
         await callback.answer("Некорректный ID ивента.")
         return
 
-    now = datetime.now(timezone.utc)
+    now = utcnow_naive()
     async with session_scope(session_factory) as session:
         repo = Repo(session)
         event = await repo.get_event(event_id)
         if event is None:
             await callback.answer("Ивент не найден.")
             return
-        if not (event.is_active and event.start_at <= now <= event.end_at):
+        if not (
+            event.is_active
+            and is_within_period(now=now, start=event.start_at, end=event.end_at)
+        ):
             await callback.answer("Ивент недоступен.", show_alert=True)
             return
 
