@@ -20,7 +20,7 @@ router = Router(name="events")
 
 @router.callback_query(lambda c: c.data == "event:noop")
 async def event_noop(callback: CallbackQuery) -> None:
-    await callback.answer("Действие недоступно.")
+    await callback.answer("⭐ Вы уже участвуете в ивенте")
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("event:open:"))

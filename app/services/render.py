@@ -50,11 +50,11 @@ def event_card_text(event: Event) -> str:
         )
     return (
         f"🏆 <b>{escape(event.title)}</b>\n\n"
-        f"🕒 Старт: {format_dt(event.start_at)}\n"
-        f"🕒 Финиш: {format_dt(event.end_at)}\n\n"
+        f"🕒 <b>Старт:</b> {format_dt(event.start_at)}\n"
+        f"🕒 <b>Финиш:</b> {format_dt(event.end_at)}\n\n"
         f"📌 <b>Описание</b>\n{escape(event.description)}\n\n"
-        f"🥇 Призовых мест: {event.prize_places}\n"
-        f"🧩 Формат: {escape(submission_type_human(event.submission_type))}"
+        f"🥇 <b>Призовых мест:</b> {event.prize_places}\n"
+        f"🧩 <b>Формат:</b> {escape(submission_type_human(event.submission_type))}"
         f"{extra}"
     )
 
