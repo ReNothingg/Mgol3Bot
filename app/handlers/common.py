@@ -48,8 +48,8 @@ async def ensure_subscribed(
         return True
 
     text = (
-        "Для использования бота нужно подписаться на канал.\n"
-        "После подписки нажмите «Проверить подписку»."
+        "Для доступа к боту нужна подписка на канал.\n"
+        "Подпишитесь и нажмите «Проверить подписку»."
     )
     keyboard = subscription_keyboard(settings.required_channel_url)
     if isinstance(target, Message):

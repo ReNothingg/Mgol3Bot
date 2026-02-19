@@ -59,7 +59,7 @@ async def cmd_admin(
     if message.from_user is None or not _is_admin(message.from_user.id, settings):
         await message.answer("Команда доступна только администраторам.")
         return
-    await message.answer("Админ-панель", reply_markup=admin_main_keyboard())
+    await message.answer("🛠 Админ-панель", reply_markup=admin_main_keyboard())
 
 
 @router.callback_query(lambda c: c.data == "admin:menu")
@@ -68,7 +68,7 @@ async def admin_menu(callback: CallbackQuery, settings: Settings) -> None:
         await callback.answer("Нет доступа.", show_alert=True)
         return
     if callback.message:
-        await callback.message.answer("Админ-панель", reply_markup=admin_main_keyboard())
+        await callback.message.answer("🛠 Админ-панель", reply_markup=admin_main_keyboard())
     await callback.answer()
 
 
@@ -230,12 +230,12 @@ async def admin_create_prize_places(
     await state.clear()
     deep_link = f"https://t.me/{settings.bot_username}?start=join_{event.id}"
     extra = (
-        f"\nСсылка быстрого участия: {deep_link}"
+        f"\n🔗 Ссылка быстрого участия: {deep_link}"
         if submission_type == SubmissionType.NONE
         else ""
     )
     await message.answer(
-        f"Ивент создан.\nID: {event.id}\nНазвание: {escape(event.title)}{extra}",
+        f"✅ Ивент создан.\nID: <code>{event.id}</code>\nНазвание: <b>{escape(event.title)}</b>{extra}",
         reply_markup=admin_main_keyboard(),
     )
 
@@ -259,7 +259,7 @@ async def admin_list_events(
             await callback.message.answer("Ивентов пока нет.", reply_markup=admin_main_keyboard())
         else:
             await callback.message.answer(
-                "Список ивентов:",
+                "📋 Список ивентов:",
                 reply_markup=admin_events_list_keyboard(events),
             )
     await callback.answer()
@@ -331,7 +331,7 @@ async def admin_delete_yes(
 
     if callback.message:
         if deleted:
-            await callback.message.answer("Ивент удален.", reply_markup=admin_main_keyboard())
+            await callback.message.answer("✅ Ивент удален.", reply_markup=admin_main_keyboard())
         else:
             await callback.message.answer("Ивент не найден.")
     await callback.answer()
@@ -465,7 +465,7 @@ async def admin_winners_finish(
     await state.clear()
     missing_text = ", ".join(str(x) for x in missing) if missing else "нет"
     await message.answer(
-        "Победители обновлены.\n"
+        "✅ Победители обновлены.\n"
         f"Назначено мест: {len(assigned)}\n"
         f"ID без участия в ивенте: {missing_text}"
     )
@@ -513,7 +513,7 @@ async def admin_export_submissions(
 
     if callback.message:
         await callback.message.answer(
-            f"Выгрузка завершена. Отправлено работ: {len(submissions)}."
+            f"✅ Выгрузка завершена. Отправлено работ: {len(submissions)}."
         )
     await callback.answer("Готово.")
 

@@ -69,6 +69,8 @@ class Repo:
             prize_places=prize_places,
             submission_type=submission_type,
             is_active=True,
+            start_notified=False,
+            reminder_24h_notified=False,
             closed_notified=False,
             created_by_admin_id=created_by_admin_id,
         )
@@ -102,6 +104,52 @@ class Repo:
     async def list_all_events(self) -> list[Event]:
         stmt = select(Event).order_by(Event.created_at.desc(), Event.id.desc())
         return list((await self.session.scalars(stmt)).all())
+
+    async def list_events_for_start_notify(self, now: datetime) -> list[Event]:
+        stmt = (
+            select(Event)
+            .where(
+                and_(
+                    Event.is_active.is_(True),
+                    Event.start_notified.is_(False),
+                    Event.start_at <= now,
+                    Event.end_at > now,
+                )
+            )
+            .order_by(Event.start_at.asc(), Event.id.asc())
+        )
+        return list((await self.session.scalars(stmt)).all())
+
+    async def mark_event_start_notified(self, event_id: int) -> None:
+        stmt = (
+            update(Event)
+            .where(Event.id == event_id)
+            .values(start_notified=True)
+        )
+        await self.session.execute(stmt)
+
+    async def list_events_for_24h_reminder(self, now: datetime, reminder_border: datetime) -> list[Event]:
+        stmt = (
+            select(Event)
+            .where(
+                and_(
+                    Event.is_active.is_(True),
+                    Event.reminder_24h_notified.is_(False),
+                    Event.end_at > now,
+                    Event.end_at <= reminder_border,
+                )
+            )
+            .order_by(Event.end_at.asc(), Event.id.asc())
+        )
+        return list((await self.session.scalars(stmt)).all())
+
+    async def mark_event_24h_reminder_notified(self, event_id: int) -> None:
+        stmt = (
+            update(Event)
+            .where(Event.id == event_id)
+            .values(reminder_24h_notified=True)
+        )
+        await self.session.execute(stmt)
 
     async def list_expired_events_for_notify(self, now: datetime) -> list[Event]:
         stmt = (
@@ -139,6 +187,7 @@ class Repo:
         event.end_at = to_utc_naive(new_end_at)
         if to_utc_naive(new_end_at) > utcnow_naive():
             event.closed_notified = False
+            event.reminder_24h_notified = False
         await self.session.flush()
         return event
 
@@ -184,6 +233,15 @@ class Repo:
             .where(User.tg_id == user_tg_id)
             .options(joinedload(Participation.event))
             .order_by(Participation.joined_at.desc(), Participation.id.desc())
+        )
+        return list((await self.session.scalars(stmt)).all())
+
+    async def list_event_participations(self, event_id: int) -> list[Participation]:
+        stmt = (
+            select(Participation)
+            .where(Participation.event_id == event_id)
+            .options(joinedload(Participation.user))
+            .order_by(Participation.joined_at.asc(), Participation.id.asc())
         )
         return list((await self.session.scalars(stmt)).all())
 

@@ -179,7 +179,7 @@ async def handle_submission_material(
 
     username = f"@{message.from_user.username}" if message.from_user.username else "без username"
     caption = (
-        f"Новая работа по ивенту <b>{escape(event.title)}</b>\n"
+        f"📥 Новая работа по ивенту <b>{escape(event.title)}</b>\n"
         f"Пользователь: {escape(username)}\n"
         f"Telegram ID: <code>{message.from_user.id}</code>"
     )
@@ -192,7 +192,7 @@ async def handle_submission_material(
         text_content=text_content,
     )
     await state.clear()
-    await message.answer("Работа принята и отправлена администраторам.")
+    await message.answer("✅ Работа принята и отправлена администраторам.")
 
 
 @router.message(SubmissionFlow.waiting_material)
@@ -217,17 +217,17 @@ def _extract_id(data: str | None) -> int | None:
 def _prompt_by_type(submission_type: SubmissionType) -> str:
     if submission_type == SubmissionType.PHOTO:
         return (
-            "Отправьте мне фото (макс. 1).\n"
-            "Качество должно быть четким, если работа на бумаге.\n"
-            "Электронные рисунки тоже принимаются."
+            "📷 Отправьте фото (максимум 1).\n"
+            "Если работа на бумаге, фото должно быть четким.\n"
+            "Электронные рисунки также принимаются."
         )
     if submission_type == SubmissionType.DOCUMENT:
         return (
-            "Отправьте файл (макс. 1).\n"
-            "Убедитесь, что файл открывается и содержит финальную версию работы."
+            "📎 Отправьте файл (максимум 1).\n"
+            "Убедитесь, что файл открывается и содержит финальную версию."
         )
     if submission_type == SubmissionType.TEXT:
-        return "Отправьте одно текстовое сообщение с вашей работой."
+        return "💬 Отправьте одно текстовое сообщение с вашей работой."
     return "Отправка материала для этого ивента не требуется."
 
 

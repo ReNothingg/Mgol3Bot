@@ -14,6 +14,14 @@ async def notify_admins(bot: Bot, admin_ids: list[int], text: str) -> None:
             continue
 
 
+async def notify_user(bot: Bot, user_id: int, text: str) -> bool:
+    try:
+        await bot.send_message(user_id, text)
+    except (TelegramBadRequest, TelegramForbiddenError):
+        return False
+    return True
+
+
 async def send_submission_to_admin(
     bot: Bot,
     *,
@@ -57,4 +65,3 @@ async def send_submission_to_admins(
             )
         except (TelegramBadRequest, TelegramForbiddenError):
             continue
-

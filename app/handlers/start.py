@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from html import escape
+
 from aiogram import Bot, Router
 from aiogram.filters import CommandStart
 from aiogram.filters.command import CommandObject
@@ -11,7 +13,7 @@ from app.db.repo import Repo
 from app.db.session import session_scope
 from app.handlers.common import ensure_subscribed, ensure_user_saved, send_main_menu
 from app.services.notifier import notify_admins
-from app.services.time_utils import is_within_period, utcnow_naive
+from app.services.time_utils import utcnow_naive
 
 router = Router(name="start")
 
@@ -100,10 +102,7 @@ async def handle_deep_link_join(
         if event is None:
             await message.answer("Ивент по ссылке не найден.")
             return
-        if not (
-            event.is_active
-            and is_within_period(now=now, start=event.start_at, end=event.end_at)
-        ):
+        if not (event.is_active and now <= event.end_at):
             await message.answer("Ивент по ссылке уже недоступен.")
             return
 
@@ -119,8 +118,20 @@ async def handle_deep_link_join(
         await notify_admins(
             bot,
             settings.admin_ids,
-            f"Новый участник по deep-link: {username} ({message.from_user.id}) в ивенте «{event.title}».",
+            "✅ Регистрация по ссылке\n"
+            f"Ивент: <b>{escape(event.title)}</b>\n"
+            f"Пользователь: {escape(username)}\n"
+            f"Telegram ID: <code>{message.from_user.id}</code>",
         )
-        await message.answer(f"Вы зарегистрированы в ивенте «{event.title}».")
+        if now < event.start_at:
+            await message.answer(
+                f"✅ Вы предварительно зарегистрированы в ивенте «{event.title}».\n"
+                "Когда ивент начнется, бот пришлет уведомление."
+            )
+        else:
+            await message.answer(
+                f"✅ Вы зарегистрированы в ивенте «{event.title}».\n"
+                "Мы пришлем напоминание за 24 часа до дедлайна и результаты после завершения."
+            )
     else:
         await message.answer(f"Вы уже участвуете в ивенте «{event.title}».")

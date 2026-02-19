@@ -60,6 +60,8 @@ class Event(Base):
         SQLEnum(SubmissionType, native_enum=False, length=20),
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    start_notified: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    reminder_24h_notified: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     closed_notified: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_by_admin_id: Mapped[int] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(
@@ -122,4 +124,3 @@ class Submission(Base):
     )
 
     participation: Mapped[Participation] = relationship(back_populates="submission")
-

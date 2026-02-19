@@ -20,7 +20,7 @@ router = Router(name="events")
 
 @router.callback_query(lambda c: c.data == "event:noop")
 async def event_noop(callback: CallbackQuery) -> None:
-    await callback.answer("Действие уже выполнено.")
+    await callback.answer("Действие недоступно.")
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("event:open:"))
@@ -68,6 +68,7 @@ async def open_event_card(
             start=event.start_at,
             end=event.end_at,
         ),
+        is_started=now >= event.start_at,
     )
     await callback.message.answer(event_card_text(event), reply_markup=keyboard)
     await callback.answer()
@@ -119,21 +120,27 @@ async def join_event(
     if created:
         username = f"@{callback.from_user.username}" if callback.from_user.username else "без username"
         text = (
-            "Пользователь зарегистрировался в ивенте.\n"
+            "✅ Новая регистрация в ивенте\n"
             f"Ивент: <b>{escape(event.title)}</b>\n"
             f"Пользователь: {escape(username)}\n"
             f"Telegram ID: <code>{callback.from_user.id}</code>"
         )
         await notify_admins(bot, settings.admin_ids, text)
-        await callback.answer("Вы зарегистрировались в ивенте.")
+        await callback.message.answer(
+            "✅ Вы успешно зарегистрированы!\n"
+            f"Ивент: <b>{escape(event.title)}</b>\n"
+            "Мы отправим напоминание за 24 часа до дедлайна и пришлем результаты после завершения."
+        )
+        await callback.answer("Готово.")
     else:
-        await callback.answer("Вы уже участвуете в этом ивенте.")
+        await callback.answer("Вы уже зарегистрированы в этом ивенте.")
 
     keyboard = event_keyboard(
         event=event,
         participation=participation,
         has_submission=has_submission,
         is_open_now=True,
+        is_started=True,
     )
     await callback.message.edit_reply_markup(reply_markup=keyboard)
 
