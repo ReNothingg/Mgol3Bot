@@ -3,21 +3,36 @@ from __future__ import annotations
 from datetime import datetime
 from html import escape
 
+from app.config import get_settings
 from app.db.models import Event, Participation, SubmissionType
+from app.services.time_utils import utc_naive_to_msk
 
 
 def format_dt(value: datetime) -> str:
-    return value.strftime("%d.%m.%Y %H:%M UTC")
+    return utc_naive_to_msk(value).strftime("%d.%m.%Y %H:%M МСК")
 
 
 def submission_type_human(submission_type: SubmissionType) -> str:
+    settings = get_settings()
     mapping = {
-        SubmissionType.PHOTO: "Нужно отправить 1 фото",
-        SubmissionType.DOCUMENT: "Нужно отправить 1 файл",
+        SubmissionType.PHOTO: _photo_submission_text(settings.max_photo_attachments),
+        SubmissionType.DOCUMENT: _document_submission_text(settings.max_document_attachments),
         SubmissionType.TEXT: "Нужно отправить 1 текстовое сообщение",
         SubmissionType.NONE: "Только регистрация участия (без отправки работы)",
     }
     return mapping.get(submission_type, "Формат не указан")
+
+
+def _photo_submission_text(limit: int) -> str:
+    if limit == 1:
+        return "Нужно отправить 1 фото (можно файлом)"
+    return f"Нужно отправить до {limit} фото (можно файлом)"
+
+
+def _document_submission_text(limit: int) -> str:
+    if limit == 1:
+        return "Нужно отправить 1 файл"
+    return f"Нужно отправить до {limit} файлов"
 
 
 def main_description(

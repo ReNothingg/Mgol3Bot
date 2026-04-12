@@ -3,7 +3,7 @@ from __future__ import annotations
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 
-from app.db.models import SubmissionType
+from app.db.models import SubmissionAttachment, SubmissionAttachmentKind, SubmissionType
 
 
 async def notify_admins(bot: Bot, admin_ids: list[int], text: str) -> None:
@@ -22,20 +22,42 @@ async def notify_user(bot: Bot, user_id: int, text: str) -> bool:
     return True
 
 
+async def _send_attachment(
+    bot: Bot,
+    *,
+    admin_id: int,
+    attachment: SubmissionAttachment,
+    caption: str | None = None,
+) -> None:
+    if attachment.kind == SubmissionAttachmentKind.DOCUMENT:
+        await bot.send_document(admin_id, document=attachment.file_id, caption=caption)
+        return
+    await bot.send_photo(admin_id, photo=attachment.file_id, caption=caption)
+
+
 async def send_submission_to_admin(
     bot: Bot,
     *,
     admin_id: int,
     submission_type: SubmissionType,
     caption: str,
-    file_id: str | None,
+    attachments: list[SubmissionAttachment] | None,
     text_content: str | None,
 ) -> None:
-    if submission_type == SubmissionType.PHOTO and file_id:
-        await bot.send_photo(admin_id, photo=file_id, caption=caption)
-        return
-    if submission_type == SubmissionType.DOCUMENT and file_id:
-        await bot.send_document(admin_id, document=file_id, caption=caption)
+    if submission_type != SubmissionType.TEXT and attachments:
+        first_attachment, *other_attachments = attachments
+        await _send_attachment(
+            bot,
+            admin_id=admin_id,
+            attachment=first_attachment,
+            caption=caption,
+        )
+        for attachment in other_attachments:
+            await _send_attachment(
+                bot,
+                admin_id=admin_id,
+                attachment=attachment,
+            )
         return
     if submission_type == SubmissionType.TEXT:
         payload = text_content or "(пусто)"
@@ -50,7 +72,7 @@ async def send_submission_to_admins(
     admin_ids: list[int],
     submission_type: SubmissionType,
     caption: str,
-    file_id: str | None,
+    attachments: list[SubmissionAttachment] | None,
     text_content: str | None,
 ) -> None:
     for admin_id in admin_ids:
@@ -60,7 +82,7 @@ async def send_submission_to_admins(
                 admin_id=admin_id,
                 submission_type=submission_type,
                 caption=caption,
-                file_id=file_id,
+                attachments=attachments,
                 text_content=text_content,
             )
         except (TelegramBadRequest, TelegramForbiddenError):

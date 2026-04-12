@@ -1,23 +1,48 @@
 from __future__ import annotations
 
+import asyncio
 from html import escape
+from pathlib import Path
+import time
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Document, Message
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
-from app.db.models import SubmissionType
+from app.db.models import (
+    SubmissionAttachment,
+    SubmissionAttachmentKind,
+    SubmissionType,
+)
 from app.db.repo import Repo
 from app.db.session import session_scope
 from app.handlers.common import ensure_subscribed
-from app.keyboards.common import submission_cancel_keyboard
+from app.keyboards.common import submission_cancel_keyboard, submission_photo_keyboard
 from app.services.notifier import send_submission_to_admins
 from app.services.time_utils import is_within_period, utcnow_naive
 
 router = Router(name="submissions")
+
+ATTACHMENTS_STATE_KEY = "attachments"
+ATTACHMENTS_UPDATED_AT_STATE_KEY = "attachments_updated_at"
+LAST_MEDIA_GROUP_ID_STATE_KEY = "last_media_group_id"
+MEDIA_GROUP_SETTLE_SECONDS = 1.0
+IMAGE_DOCUMENT_EXTENSIONS = {
+    ".bmp",
+    ".gif",
+    ".heic",
+    ".heif",
+    ".jpeg",
+    ".jpg",
+    ".png",
+    ".tif",
+    ".tiff",
+    ".webp",
+}
+_submission_locks: dict[int, asyncio.Lock] = {}
 
 
 class SubmissionFlow(StatesGroup):
@@ -77,11 +102,75 @@ async def ask_for_submission(
             return
 
         await state.set_state(SubmissionFlow.waiting_material)
-        await state.update_data(event_id=event.id, submission_type=event.submission_type.value)
+        await state.update_data(
+            event_id=event.id,
+            submission_type=event.submission_type.value,
+            attachments=[],
+            attachments_updated_at=0.0,
+            last_media_group_id=None,
+        )
 
-    prompt = _prompt_by_type(event.submission_type)
-    await callback.message.answer(prompt, reply_markup=submission_cancel_keyboard(event.id))
+    prompt = _prompt_by_type(event.submission_type, settings)
+    await callback.message.answer(
+        prompt,
+        reply_markup=_submission_reply_markup(event.id, event.submission_type, settings),
+    )
     await callback.answer()
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("event:done:"))
+async def finish_attachment_submission(
+    callback: CallbackQuery,
+    state: FSMContext,
+    bot: Bot,
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    if callback.from_user is None or callback.message is None:
+        return
+    if not await ensure_subscribed(
+        bot=bot,
+        settings=settings,
+        user_id=callback.from_user.id,
+        target=callback,
+    ):
+        return
+
+    await _wait_for_media_group_settle(state)
+
+    async with _submission_lock(callback.from_user.id):
+        data = await state.get_data()
+        context = _submission_context(data)
+        if context is None:
+            await callback.answer("Отправка уже завершена.", show_alert=False)
+            return
+
+        event_id, submission_type = context
+        if submission_type not in {SubmissionType.PHOTO, SubmissionType.DOCUMENT}:
+            await callback.answer("Для этого формата подтверждение не требуется.", show_alert=True)
+            return
+
+        attachments = _state_attachments(data.get(ATTACHMENTS_STATE_KEY))
+        if not attachments:
+            await callback.answer(_empty_attachments_text(submission_type), show_alert=True)
+            return
+
+        saved, reply_text, clear_state = await _store_submission(
+            user_id=callback.from_user.id,
+            username=callback.from_user.username,
+            event_id=event_id,
+            submission_type=submission_type,
+            attachments=attachments,
+            text_content=None,
+            bot=bot,
+            settings=settings,
+            session_factory=session_factory,
+        )
+        if clear_state:
+            await state.clear()
+
+        await callback.message.answer(reply_text)
+        await callback.answer("Готово." if saved else "Не удалось сохранить.", show_alert=not saved)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("event:cancel:"))
@@ -113,98 +202,223 @@ async def handle_submission_material(
     ):
         return
 
-    data = await state.get_data()
-    event_id = data.get("event_id")
-    type_raw = data.get("submission_type")
-    if not isinstance(event_id, int) or not isinstance(type_raw, str):
-        await state.clear()
-        await message.answer("Сессия отправки сброшена. Нажмите кнопку заново.")
-        return
-
-    try:
-        submission_type = SubmissionType(type_raw)
-    except ValueError:
-        await state.clear()
-        await message.answer("Сессия отправки сброшена. Нажмите кнопку заново.")
-        return
-
-    file_id: str | None = None
-    text_content: str | None = None
-
-    if submission_type == SubmissionType.PHOTO:
-        if not message.photo:
-            await message.answer("Нужно отправить именно фото.")
+    async with _submission_lock(message.from_user.id):
+        data = await state.get_data()
+        context = _submission_context(data)
+        if context is None:
             return
-        file_id = message.photo[-1].file_id
-    elif submission_type == SubmissionType.DOCUMENT:
-        if not message.document:
-            await message.answer("Нужно отправить именно файл.")
+
+        event_id, submission_type = context
+        reply_markup = _submission_reply_markup(event_id, submission_type, settings)
+
+        attachments: list[SubmissionAttachment] | None = None
+        text_content: str | None = None
+
+        if submission_type == SubmissionType.PHOTO:
+            limit = settings.max_photo_attachments
+            attachment, error_text = _photo_attachment_from_message(message)
+            if attachment is None:
+                await message.answer(error_text or "Нужно отправить фото.", reply_markup=reply_markup)
+                return
+
+            attachments = _state_attachments(data.get(ATTACHMENTS_STATE_KEY))
+            if len(attachments) >= limit:
+                await message.answer(
+                    _limit_reached_text(submission_type, limit),
+                    reply_markup=reply_markup,
+                )
+                return
+
+            attachments.append(attachment)
+            await _update_attachments_state(
+                state=state,
+                attachments=attachments,
+                media_group_id=message.media_group_id,
+            )
+
+            if message.media_group_id:
+                return
+
+            if limit == 1:
+                _, reply_text, clear_state = await _store_submission(
+                    user_id=message.from_user.id,
+                    username=message.from_user.username,
+                    event_id=event_id,
+                    submission_type=submission_type,
+                    attachments=attachments,
+                    text_content=None,
+                    bot=bot,
+                    settings=settings,
+                    session_factory=session_factory,
+                )
+                if clear_state:
+                    await state.clear()
+                await message.answer(reply_text)
+                return
+
+            await message.answer(
+                _attachment_progress_text(submission_type, len(attachments), limit),
+                reply_markup=reply_markup,
+            )
             return
-        file_id = message.document.file_id
-    elif submission_type == SubmissionType.TEXT:
+
+        if submission_type == SubmissionType.DOCUMENT:
+            limit = settings.max_document_attachments
+            attachment, error_text = _document_attachment_from_message(message)
+            if attachment is None:
+                await message.answer(error_text or "Нужно отправить именно файл.", reply_markup=reply_markup)
+                return
+
+            attachments = _state_attachments(data.get(ATTACHMENTS_STATE_KEY))
+            if len(attachments) >= limit:
+                await message.answer(
+                    _limit_reached_text(submission_type, limit),
+                    reply_markup=reply_markup,
+                )
+                return
+
+            attachments.append(attachment)
+            await _update_attachments_state(
+                state=state,
+                attachments=attachments,
+                media_group_id=message.media_group_id,
+            )
+
+            if message.media_group_id:
+                return
+
+            if limit == 1:
+                _, reply_text, clear_state = await _store_submission(
+                    user_id=message.from_user.id,
+                    username=message.from_user.username,
+                    event_id=event_id,
+                    submission_type=submission_type,
+                    attachments=attachments,
+                    text_content=None,
+                    bot=bot,
+                    settings=settings,
+                    session_factory=session_factory,
+                )
+                if clear_state:
+                    await state.clear()
+                await message.answer(reply_text)
+                return
+
+            await message.answer(
+                _attachment_progress_text(submission_type, len(attachments), limit),
+                reply_markup=reply_markup,
+            )
+            return
+
         if not message.text:
-            await message.answer("Нужно отправить именно текстовое сообщение.")
+            await message.answer(
+                "Нужно отправить именно текстовое сообщение.",
+                reply_markup=reply_markup,
+            )
             return
         text_content = message.text.strip()
         if not text_content:
-            await message.answer("Текст не должен быть пустым.")
+            await message.answer("Текст не должен быть пустым.", reply_markup=reply_markup)
             return
 
+        _, reply_text, clear_state = await _store_submission(
+            user_id=message.from_user.id,
+            username=message.from_user.username,
+            event_id=event_id,
+            submission_type=submission_type,
+            attachments=attachments,
+            text_content=text_content,
+            bot=bot,
+            settings=settings,
+            session_factory=session_factory,
+        )
+        if clear_state:
+            await state.clear()
+        await message.answer(reply_text)
+
+
+@router.message(SubmissionFlow.waiting_material)
+async def wrong_submission_material(
+    message: Message,
+    state: FSMContext,
+    settings: Settings,
+) -> None:
+    data = await state.get_data()
+    context = _submission_context(data)
+    if context is None:
+        return
+
+    event_id, submission_type = context
+    await message.answer(
+        _short_hint(submission_type, settings),
+        reply_markup=_submission_reply_markup(event_id, submission_type, settings),
+    )
+
+
+async def _store_submission(
+    *,
+    user_id: int,
+    username: str | None,
+    event_id: int,
+    submission_type: SubmissionType,
+    attachments: list[SubmissionAttachment] | None,
+    text_content: str | None,
+    bot: Bot,
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> tuple[bool, str, bool]:
     async with session_scope(session_factory) as session:
         repo = Repo(session)
         event = await repo.get_event(event_id)
         if event is None:
-            await state.clear()
-            await message.answer("Ивент не найден.")
-            return
+            return False, "Ивент не найден.", True
+
         participation = await repo.get_participation(
-            user_tg_id=message.from_user.id,
+            user_tg_id=user_id,
             event_id=event.id,
         )
         if participation is None:
-            await state.clear()
-            await message.answer("Вы не зарегистрированы в этом ивенте.")
-            return
+            return False, "Вы не зарегистрированы в этом ивенте.", True
 
         saved = await repo.save_submission(
             participation_id=participation.id,
             submission_type=submission_type,
-            file_id=file_id,
+            attachments=attachments,
             text_content=text_content,
         )
         if saved is None:
-            await state.clear()
-            await message.answer("Работа уже была отправлена ранее (максимум 1).")
-            return
+            return False, "Работа уже была отправлена ранее (максимум 1).", True
 
-    username = f"@{message.from_user.username}" if message.from_user.username else "без username"
-    caption = (
-        f"📥 Новая работа по ивенту <b>{escape(event.title)}</b>\n"
-        f"Пользователь: {escape(username)}\n"
-        f"Telegram ID: <code>{message.from_user.id}</code>"
+        event_title = event.title
+
+    caption = _submission_caption(
+        event_title=event_title,
+        user_id=user_id,
+        username=username,
     )
     await send_submission_to_admins(
         bot,
         admin_ids=settings.admin_ids,
         submission_type=submission_type,
         caption=caption,
-        file_id=file_id,
+        attachments=attachments,
         text_content=text_content,
     )
-    await state.clear()
-    await message.answer("✅ Работа принята и отправлена администраторам.")
+    return True, "✅ Работа принята и отправлена администраторам.", True
 
 
-@router.message(SubmissionFlow.waiting_material)
-async def wrong_submission_material(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    type_raw = data.get("submission_type")
-    try:
-        expected = SubmissionType(type_raw)
-    except Exception:
-        await message.answer("Ожидаю материал по выбранному формату.")
-        return
-    await message.answer(_short_hint(expected))
+def _submission_caption(
+    *,
+    event_title: str,
+    user_id: int,
+    username: str | None,
+) -> str:
+    username_text = f"@{username}" if username else "без username"
+    return (
+        f"📥 Новая работа по ивенту <b>{escape(event_title)}</b>\n"
+        f"Пользователь: {escape(username_text)}\n"
+        f"Telegram ID: <code>{user_id}</code>"
+    )
 
 
 def _extract_id(data: str | None) -> int | None:
@@ -214,28 +428,221 @@ def _extract_id(data: str | None) -> int | None:
     return int(chunk) if chunk.isdigit() else None
 
 
-def _prompt_by_type(submission_type: SubmissionType) -> str:
-    if submission_type == SubmissionType.PHOTO:
+def _submission_context(data: dict[str, object]) -> tuple[int, SubmissionType] | None:
+    event_id = data.get("event_id")
+    type_raw = data.get("submission_type")
+    if not isinstance(event_id, int) or not isinstance(type_raw, str):
+        return None
+
+    try:
+        submission_type = SubmissionType(type_raw)
+    except ValueError:
+        return None
+    return event_id, submission_type
+
+
+def _submission_reply_markup(
+    event_id: int,
+    submission_type: SubmissionType,
+    settings: Settings,
+):
+    if submission_type == SubmissionType.PHOTO and settings.max_photo_attachments > 1:
+        return submission_photo_keyboard(event_id)
+    if submission_type == SubmissionType.DOCUMENT and settings.max_document_attachments > 1:
+        return submission_photo_keyboard(event_id)
+    return submission_cancel_keyboard(event_id)
+
+
+def _photo_attachment_from_message(
+    message: Message,
+) -> tuple[SubmissionAttachment | None, str | None]:
+    if message.photo:
         return (
-            "📷 Отправьте фото (максимум 1).\n"
-            "Если работа на бумаге, фото должно быть четким.\n"
-            "Электронные рисунки также принимаются."
+            SubmissionAttachment(
+                kind=SubmissionAttachmentKind.PHOTO,
+                file_id=message.photo[-1].file_id,
+            ),
+            None,
         )
-    if submission_type == SubmissionType.DOCUMENT:
+
+    if message.document is None:
         return (
-            "📎 Отправьте файл (максимум 1).\n"
+            None,
+            "Нужно отправить фото. Можно прислать обычное фото или изображение файлом.",
+        )
+
+    if not _is_image_document(message.document):
+        return (
+            None,
+            "Файлом можно отправлять только изображение: JPG, PNG, WEBP и т.д.",
+        )
+
+    return (
+        SubmissionAttachment(
+            kind=SubmissionAttachmentKind.DOCUMENT,
+            file_id=message.document.file_id,
+        ),
+        None,
+    )
+
+
+def _is_image_document(document: Document) -> bool:
+    mime_type = (document.mime_type or "").lower()
+    if mime_type.startswith("image/"):
+        return True
+
+    file_name = document.file_name or ""
+    return Path(file_name).suffix.lower() in IMAGE_DOCUMENT_EXTENSIONS
+
+
+def _document_attachment_from_message(
+    message: Message,
+) -> tuple[SubmissionAttachment | None, str | None]:
+    if message.document is None:
+        return None, "Нужно отправить именно файл."
+    return (
+        SubmissionAttachment(
+            kind=SubmissionAttachmentKind.DOCUMENT,
+            file_id=message.document.file_id,
+        ),
+        None,
+    )
+
+
+def _state_attachments(raw: object) -> list[SubmissionAttachment]:
+    if not isinstance(raw, list):
+        return []
+
+    attachments: list[SubmissionAttachment] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        file_id = item.get("file_id")
+        kind_raw = item.get("kind")
+        if not isinstance(file_id, str) or not file_id:
+            continue
+        try:
+            kind = SubmissionAttachmentKind(str(kind_raw))
+        except ValueError:
+            continue
+        attachments.append(SubmissionAttachment(kind=kind, file_id=file_id))
+    return attachments
+
+
+def _serialize_attachments(
+    attachments: list[SubmissionAttachment],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "kind": attachment.kind.value,
+            "file_id": attachment.file_id,
+        }
+        for attachment in attachments
+    ]
+
+
+async def _update_attachments_state(
+    *,
+    state: FSMContext,
+    attachments: list[SubmissionAttachment],
+    media_group_id: str | None,
+) -> None:
+    await state.update_data(
+        **{
+            ATTACHMENTS_STATE_KEY: _serialize_attachments(attachments),
+            ATTACHMENTS_UPDATED_AT_STATE_KEY: time.time(),
+            LAST_MEDIA_GROUP_ID_STATE_KEY: media_group_id,
+        }
+    )
+
+
+def _submission_lock(user_id: int) -> asyncio.Lock:
+    lock = _submission_locks.get(user_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _submission_locks[user_id] = lock
+    return lock
+
+
+async def _wait_for_media_group_settle(state: FSMContext) -> None:
+    for _ in range(3):
+        data = await state.get_data()
+        if not _has_pending_media_group(data):
+            return
+        await asyncio.sleep(MEDIA_GROUP_SETTLE_SECONDS)
+
+
+def _has_pending_media_group(data: dict[str, object]) -> bool:
+    media_group_id = data.get(LAST_MEDIA_GROUP_ID_STATE_KEY)
+    updated_at = data.get(ATTACHMENTS_UPDATED_AT_STATE_KEY)
+    if not isinstance(media_group_id, str) or not media_group_id:
+        return False
+    if not isinstance(updated_at, (int, float)):
+        return False
+    return (time.time() - float(updated_at)) < MEDIA_GROUP_SETTLE_SECONDS
+
+
+def _prompt_by_type(submission_type: SubmissionType, settings: Settings) -> str:
+    if submission_type == SubmissionType.PHOTO:
+        limit = settings.max_photo_attachments
+        finish_text = "Когда закончите, нажмите «Готово»." if limit > 1 else ""
+        return (
+            f"📷 Отправьте одно или несколько фото, максимум {limit}.\n"
+            "Можно присылать обычные фото, альбомы и изображения файлом.\n"
+            f"{finish_text}".strip()
+        ).strip()
+    if submission_type == SubmissionType.DOCUMENT:
+        limit = settings.max_document_attachments
+        finish_text = "Когда закончите, нажмите «Готово»." if limit > 1 else ""
+        return (
+            f"📎 Отправьте файл или несколько файлов, максимум {limit}.\n"
             "Убедитесь, что файл открывается и содержит финальную версию."
+            + (f"\n{finish_text}" if finish_text else "")
         )
     if submission_type == SubmissionType.TEXT:
         return "💬 Отправьте одно текстовое сообщение с вашей работой."
     return "Отправка материала для этого ивента не требуется."
 
 
-def _short_hint(submission_type: SubmissionType) -> str:
+def _attachment_progress_text(
+    submission_type: SubmissionType,
+    count: int,
+    limit: int,
+) -> str:
+    noun = "фото" if submission_type == SubmissionType.PHOTO else "файлов"
+    return (
+        f"Добавлено {noun}: {count}/{limit}.\n"
+        "Отправьте еще материалы или нажмите «Готово»."
+    )
+
+
+def _short_hint(submission_type: SubmissionType, settings: Settings) -> str:
     if submission_type == SubmissionType.PHOTO:
-        return "Сейчас ожидается фото. Отправьте фото или нажмите «Отмена»."
+        limit = settings.max_photo_attachments
+        finish_text = " и нажмите «Готово»" if limit > 1 else ""
+        return (
+            "Сейчас ожидаются фото. Отправьте одно или несколько фото "
+            f"(можно файлом){finish_text}."
+        )
     if submission_type == SubmissionType.DOCUMENT:
+        limit = settings.max_document_attachments
+        if limit > 1:
+            return "Сейчас ожидаются файлы. Отправьте один или несколько файлов и нажмите «Готово»."
         return "Сейчас ожидается файл. Отправьте документ или нажмите «Отмена»."
     if submission_type == SubmissionType.TEXT:
         return "Сейчас ожидается текстовое сообщение. Отправьте текст или нажмите «Отмена»."
     return "Ожидается материал по ивенту."
+
+
+def _limit_reached_text(submission_type: SubmissionType, limit: int) -> str:
+    noun = "фото" if submission_type == SubmissionType.PHOTO else "файлов"
+    return (
+        f"Можно прикрепить не больше {limit} {noun}. "
+        "Нажмите «Готово» или «Отмена»."
+    )
+
+
+def _empty_attachments_text(submission_type: SubmissionType) -> str:
+    if submission_type == SubmissionType.PHOTO:
+        return "Сначала отправьте хотя бы одно фото."
+    return "Сначала отправьте хотя бы один файл."

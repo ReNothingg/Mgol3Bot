@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
@@ -27,6 +29,17 @@ class SubmissionType(str, Enum):
     DOCUMENT = "document"
     TEXT = "text"
     NONE = "none"
+
+
+class SubmissionAttachmentKind(str, Enum):
+    PHOTO = "photo"
+    DOCUMENT = "document"
+
+
+@dataclass(frozen=True, slots=True)
+class SubmissionAttachment:
+    kind: SubmissionAttachmentKind
+    file_id: str
 
 
 class User(Base):
@@ -117,6 +130,7 @@ class Submission(Base):
         SQLEnum(SubmissionType, native_enum=False, length=20),
     )
     file_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attachments_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     text_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -124,3 +138,58 @@ class Submission(Base):
     )
 
     participation: Mapped[Participation] = relationship(back_populates="submission")
+
+    @property
+    def attachments(self) -> list[SubmissionAttachment]:
+        if self.attachments_json:
+            try:
+                payload = json.loads(self.attachments_json)
+            except json.JSONDecodeError:
+                payload = None
+            attachments = _decode_attachments(payload)
+            if attachments:
+                return attachments
+        if self.file_id:
+            legacy_kind = (
+                SubmissionAttachmentKind.DOCUMENT
+                if self.submission_type == SubmissionType.DOCUMENT
+                else SubmissionAttachmentKind.PHOTO
+            )
+            return [SubmissionAttachment(kind=legacy_kind, file_id=self.file_id)]
+        return []
+
+    def set_attachments(self, attachments: list[SubmissionAttachment]) -> None:
+        self.file_id = attachments[0].file_id if attachments else None
+        self.attachments_json = (
+            json.dumps(
+                [
+                    {
+                        "kind": attachment.kind.value,
+                        "file_id": attachment.file_id,
+                    }
+                    for attachment in attachments
+                ]
+            )
+            if attachments
+            else None
+        )
+
+
+def _decode_attachments(payload: object) -> list[SubmissionAttachment]:
+    if not isinstance(payload, list):
+        return []
+
+    attachments: list[SubmissionAttachment] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        file_id = item.get("file_id")
+        kind_raw = item.get("kind")
+        if not isinstance(file_id, str) or not file_id:
+            continue
+        try:
+            kind = SubmissionAttachmentKind(str(kind_raw))
+        except ValueError:
+            continue
+        attachments.append(SubmissionAttachment(kind=kind, file_id=file_id))
+    return attachments

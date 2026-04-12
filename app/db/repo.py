@@ -7,7 +7,14 @@ from sqlalchemy import and_, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.db.models import Event, Participation, Submission, SubmissionType, User
+from app.db.models import (
+    Event,
+    Participation,
+    Submission,
+    SubmissionAttachment,
+    SubmissionType,
+    User,
+)
 from app.services.time_utils import to_utc_naive, utcnow_naive
 
 
@@ -254,7 +261,7 @@ class Repo:
         *,
         participation_id: int,
         submission_type: SubmissionType,
-        file_id: str | None = None,
+        attachments: list[SubmissionAttachment] | None = None,
         text_content: str | None = None,
     ) -> Submission | None:
         existing = await self.get_submission(participation_id)
@@ -264,9 +271,9 @@ class Repo:
         submission = Submission(
             participation_id=participation_id,
             submission_type=submission_type,
-            file_id=file_id,
             text_content=text_content,
         )
+        submission.set_attachments(attachments or [])
         self.session.add(submission)
         await self.session.flush()
         return submission

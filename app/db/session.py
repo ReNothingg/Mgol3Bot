@@ -42,10 +42,10 @@ async def init_db(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         if engine.url.drivername.startswith("sqlite"):
-            await _apply_sqlite_event_columns_migration(conn)
+            await _apply_sqlite_schema_migrations(conn)
 
 
-async def _apply_sqlite_event_columns_migration(conn) -> None:
+async def _apply_sqlite_schema_migrations(conn) -> None:
     result = await conn.execute(text("PRAGMA table_info(events)"))
     columns = {row[1] for row in result.fetchall()}
     if "start_notified" not in columns:
@@ -59,6 +59,13 @@ async def _apply_sqlite_event_columns_migration(conn) -> None:
             text(
                 "ALTER TABLE events ADD COLUMN reminder_24h_notified BOOLEAN NOT NULL DEFAULT 0"
             )
+        )
+
+    result = await conn.execute(text("PRAGMA table_info(submissions)"))
+    columns = {row[1] for row in result.fetchall()}
+    if "attachments_json" not in columns:
+        await conn.execute(
+            text("ALTER TABLE submissions ADD COLUMN attachments_json TEXT")
         )
 
 

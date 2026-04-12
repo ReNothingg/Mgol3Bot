@@ -18,6 +18,17 @@ def _parse_admin_ids(raw: str) -> list[int]:
     return admin_ids
 
 
+def _parse_positive_int(raw: str | None, default: int) -> int:
+    if raw is None:
+        return default
+    value = raw.strip()
+    if not value:
+        return default
+    if value.isdigit():
+        return max(1, int(value))
+    return default
+
+
 @dataclass(frozen=True)
 class Settings:
     bot_token: str
@@ -29,6 +40,8 @@ class Settings:
     bot_name: str
     channel_name: str
     developer_url: str
+    max_photo_attachments: int
+    max_document_attachments: int
 
 
 @lru_cache
@@ -52,5 +65,13 @@ def get_settings() -> Settings:
         bot_name=os.getenv("BOT_NAME", "К — значит конкурс").strip(),
         channel_name=os.getenv("CHANNEL_NAME", "Л — значит Лицей 🤟").strip(),
         developer_url=os.getenv("DEVELOPER_URL", "https://t.me/daich").strip(),
+        max_photo_attachments=_parse_positive_int(
+            os.getenv("MAX_PHOTO_ATTACHMENTS"),
+            default=10,
+        ),
+        max_document_attachments=_parse_positive_int(
+            os.getenv("MAX_DOCUMENT_ATTACHMENTS"),
+            default=1,
+        ),
     )
 

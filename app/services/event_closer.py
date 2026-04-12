@@ -212,7 +212,7 @@ class EventCloser:
                 admin_ids=self.settings.admin_ids,
                 submission_type=record.submission.submission_type,
                 caption=caption,
-                file_id=record.submission.file_id,
+                attachments=record.submission.attachments,
                 text_content=record.submission.text_content,
             )
 

@@ -22,7 +22,7 @@ from app.keyboards.admin import (
     admin_events_list_keyboard,
     admin_main_keyboard,
 )
-from app.services.datetime_utils import DATETIME_INPUT_FORMAT, parse_datetime_utc
+from app.services.datetime_utils import DATETIME_INPUT_FORMAT, parse_datetime_msk
 from app.services.notifier import send_submission_to_admins
 from app.services.render import event_manage_text
 from app.services.time_utils import utcnow_naive
@@ -140,7 +140,7 @@ async def admin_create_description(message: Message, state: FSMContext, settings
     await state.set_state(CreateEventFSM.waiting_start)
     await state.update_data(description=description)
     await message.answer(
-        f"Введите дату начала в формате {DATETIME_INPUT_FORMAT} (UTC).\n"
+        f"Введите дату начала в формате {DATETIME_INPUT_FORMAT} (МСК).\n"
         "Пример: 20.02.2026 12:00"
     )
 
@@ -149,14 +149,14 @@ async def admin_create_description(message: Message, state: FSMContext, settings
 async def admin_create_start_dt(message: Message, state: FSMContext, settings: Settings) -> None:
     if message.from_user is None or not _is_admin(message.from_user.id, settings):
         return
-    start_at = parse_datetime_utc(message.text or "")
+    start_at = parse_datetime_msk(message.text or "")
     if start_at is None:
-        await message.answer(f"Неверный формат. Используйте {DATETIME_INPUT_FORMAT}.")
+        await message.answer(f"Неверный формат. Используйте {DATETIME_INPUT_FORMAT} (МСК).")
         return
     await state.set_state(CreateEventFSM.waiting_end)
     await state.update_data(start_at=start_at.isoformat())
     await message.answer(
-        f"Введите дату окончания в формате {DATETIME_INPUT_FORMAT} (UTC).\n"
+        f"Введите дату окончания в формате {DATETIME_INPUT_FORMAT} (МСК).\n"
         "Дата окончания должна быть позже старта."
     )
 
@@ -165,9 +165,9 @@ async def admin_create_start_dt(message: Message, state: FSMContext, settings: S
 async def admin_create_end_dt(message: Message, state: FSMContext, settings: Settings) -> None:
     if message.from_user is None or not _is_admin(message.from_user.id, settings):
         return
-    end_at = parse_datetime_utc(message.text or "")
+    end_at = parse_datetime_msk(message.text or "")
     if end_at is None:
-        await message.answer(f"Неверный формат. Используйте {DATETIME_INPUT_FORMAT}.")
+        await message.answer(f"Неверный формат. Используйте {DATETIME_INPUT_FORMAT} (МСК).")
         return
     data = await state.get_data()
     start_at_raw = data.get("start_at")
@@ -354,7 +354,7 @@ async def admin_deadline_start(
     await state.update_data(deadline_event_id=event_id)
     if callback.message:
         await callback.message.answer(
-            f"Введите новый дедлайн в формате {DATETIME_INPUT_FORMAT} (UTC)."
+            f"Введите новый дедлайн в формате {DATETIME_INPUT_FORMAT} (МСК)."
         )
     await callback.answer()
 
@@ -368,9 +368,9 @@ async def admin_deadline_finish(
 ) -> None:
     if message.from_user is None or not _is_admin(message.from_user.id, settings):
         return
-    new_deadline = parse_datetime_utc(message.text or "")
+    new_deadline = parse_datetime_msk(message.text or "")
     if new_deadline is None:
-        await message.answer(f"Неверный формат. Используйте {DATETIME_INPUT_FORMAT}.")
+        await message.answer(f"Неверный формат. Используйте {DATETIME_INPUT_FORMAT} (МСК).")
         return
     if new_deadline <= utcnow_naive():
         await message.answer("Дедлайн должен быть в будущем.")
@@ -507,7 +507,7 @@ async def admin_export_submissions(
             admin_ids=settings.admin_ids,
             submission_type=record.submission.submission_type,
             caption=caption,
-            file_id=record.submission.file_id,
+            attachments=record.submission.attachments,
             text_content=record.submission.text_content,
         )
 

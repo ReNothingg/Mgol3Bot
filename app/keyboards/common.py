@@ -71,6 +71,14 @@ def submission_cancel_keyboard(event_id: int) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def submission_photo_keyboard(event_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Готово", callback_data=f"event:done:{event_id}")
+    kb.button(text="❌ Отмена", callback_data=f"event:cancel:{event_id}")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
 def my_events_keyboard(participations: list[Participation]) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for participation in participations:
