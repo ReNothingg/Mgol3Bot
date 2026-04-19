@@ -13,5 +13,5 @@ def parse_datetime_msk(value: str) -> datetime | None:
         dt = datetime.strptime(value.strip(), DATETIME_INPUT_FORMAT)
     except ValueError:
         return None
-    # We store UTC in DB as naive datetime for SQLite compatibility.
+
     return msk_to_utc_naive(dt)

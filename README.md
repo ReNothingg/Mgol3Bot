@@ -46,12 +46,13 @@ pip install -r requirements.txt
 
 - `BOT_TOKEN`
 - `ADMIN_IDS` (через запятую)
+- `DIRECT_URL` для кнопки «Напишите нам!» в главном меню
 - `MAX_PHOTO_ATTACHMENTS` и `MAX_DOCUMENT_ATTACHMENTS` для лимитов вложений
 
 1. Запустите бота:
 
 ```bash
-python -m app.main
+python3 -m app.main
 ```
 
 ## Важно

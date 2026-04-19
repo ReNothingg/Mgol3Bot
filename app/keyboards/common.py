@@ -14,12 +14,13 @@ def subscription_keyboard(channel_url: str) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def main_menu_keyboard(events: list[Event]) -> InlineKeyboardMarkup:
+def main_menu_keyboard(events: list[Event], direct_url: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     if not events:
         kb.button(text="📭 Сейчас нет активных ивентов", callback_data="event:noop")
     for event in events:
         kb.button(text=f"🎯 {event.title}", callback_data=f"event:open:{event.id}")
+    kb.button(text="✉️ Напишите нам!", url=direct_url)
     kb.adjust(1)
     return kb.as_markup()
 

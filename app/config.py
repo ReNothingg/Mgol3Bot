@@ -35,6 +35,7 @@ class Settings:
     bot_username: str
     required_channel: str
     required_channel_url: str
+    direct_url: str
     admin_ids: list[int]
     database_url: str
     bot_name: str
@@ -60,6 +61,7 @@ def get_settings() -> Settings:
             "REQUIRED_CHANNEL_URL",
             "https://t.me/LMeansLyceum3",
         ).strip(),
+        direct_url=os.getenv("DIRECT_URL", "https://t.me/mgol3?direct").strip(),
         admin_ids=_parse_admin_ids(os.getenv("ADMIN_IDS", "")),
         database_url=os.getenv("DATABASE_URL", "sqlite+aiosqlite:///bot.db").strip(),
         bot_name=os.getenv("BOT_NAME", "К — значит конкурс").strip(),
@@ -74,4 +76,3 @@ def get_settings() -> Settings:
             default=1,
         ),
     )
-

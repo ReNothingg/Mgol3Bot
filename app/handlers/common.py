@@ -78,7 +78,7 @@ async def send_main_menu(
         channel_url=settings.required_channel_url,
         developer_url=settings.developer_url,
     )
-    keyboard = main_menu_keyboard(events)
+    keyboard = main_menu_keyboard(events, settings.direct_url)
     if isinstance(target, Message):
         await target.answer(text, reply_markup=keyboard)
         return
